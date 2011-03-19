@@ -1,0 +1,671 @@
+diff -x.git --new-file -ur minecraft.orig/net/minecraft/client/Minecraft.java minecraft/net/minecraft/client/Minecraft.java
+--- minecraft.orig/net/minecraft/client/Minecraft.java	2011-03-18 20:33:22.000000000 -0400
++++ minecraft/net/minecraft/client/Minecraft.java	2011-03-18 20:37:06.000000000 -0400
+@@ -4,16 +4,18 @@
+ 
+ package net.minecraft.client;
+ 
+-import net.minecraft.src.*;
+ import java.awt.*;
+-import java.io.*;
++import java.io.File;
+ import java.nio.ByteBuffer;
+-import org.lwjgl.BufferUtils;
+-import org.lwjgl.LWJGLException;
++
++import net.minecraft.src.*;
++
++import org.lwjgl.*;
+ import org.lwjgl.input.*;
+ import org.lwjgl.opengl.*;
+ import org.lwjgl.opengl.DisplayMode;
+ import org.lwjgl.util.glu.GLU;
++import org.maski.pogic.PogicModLoader;
+ 
+ // Referenced classes of package net.minecraft.client:
+ //            MinecraftApplet
+@@ -62,8 +64,13 @@
+             hideQuitButton = false;
+         }
+         field_21900_a = this;
++        pogicModLoader = new PogicModLoader(this);
+     }
+-
++    
++    public PogicModLoader getPogicModLoader() {
++    	return pogicModLoader;
++    }
++    
+     public abstract void displayUnexpectedThrowable(UnexpectedThrowable unexpectedthrowable);
+ 
+     public void setServer(String s, int i)
+@@ -1618,5 +1625,7 @@
+     public boolean isRaining;
+     long systemTime;
+     private int field_6300_ab;
++    
++    private PogicModLoader pogicModLoader;
+ 
+ }
+diff -x.git --new-file -ur minecraft.orig/net/minecraft/src/EntityList.java minecraft/net/minecraft/src/EntityList.java
+--- minecraft.orig/net/minecraft/src/EntityList.java	2011-03-18 20:33:22.000000000 -0400
++++ minecraft/net/minecraft/src/EntityList.java	2011-03-18 17:00:54.000000000 -0400
+@@ -15,7 +15,7 @@
+     {
+     }
+ 
+-    private static void addMapping(Class class1, String s, int i)
++    public static void addMapping(Class class1, String s, int i)
+     {
+         stringToClassMapping.put(s, class1);
+         classToStringMapping.put(class1, s);
+diff -x.git --new-file -ur minecraft.orig/net/minecraft/src/NetClientHandler.java minecraft/net/minecraft/src/NetClientHandler.java
+--- minecraft.orig/net/minecraft/src/NetClientHandler.java	2011-03-18 20:33:22.000000000 -0400
++++ minecraft/net/minecraft/src/NetClientHandler.java	2011-03-19 12:11:11.000000000 -0400
+@@ -6,17 +6,23 @@
+ import java.io.*;
+ import java.net.*;
+ import java.util.Random;
++
++import org.maski.pogic.*;
++
+ import net.minecraft.client.Minecraft;
+ 
+ public class NetClientHandler extends NetHandler
+ {
+ 
++    static final int PROTOCOL_VERSION = 9;
++    
+     public NetClientHandler(Minecraft minecraft, String s, int i) throws UnknownHostException, IOException
+     {
+         disconnected = false;
+         field_1210_g = false;
+         rand = new Random();
+         mc = minecraft;
++        serverName = s;
+         Socket socket = new Socket(InetAddress.getByName(s), i);
+         netManager = new NetworkManager(socket, "Client", this);
+     }
+@@ -43,6 +49,19 @@
+         mc.thePlayer.entityId = packet1login.protocolVersion;
+     }
+ 
++
++    public void handleModsNeeded(Packet200Pogic packet) {
++        File modResources = new File(Minecraft.getMinecraftDir(), "resources/mods/" + serverName + "/");
++        if(!modResources.exists() && !modResources.mkdirs()) {
++            throw new RuntimeException("could not create " + modResources.getAbsolutePath());
++        }
++
++        mc.getPogicModLoader().loadMods(modResources, packet.packages);
++        mc.getPogicModLoader().registerEntites(packet.entityMap);
++        addToSendQueue(new Packet200Pogic());
++    }
++    
++    
+     public void handlePickupSpawn(Packet21PickupSpawn packet21pickupspawn)
+     {
+         double d = (double)packet21pickupspawn.xPosition / 32D;
+@@ -392,9 +411,10 @@
+ 
+     public void handleHandshake(Packet2Handshake packet2handshake)
+     {
++        int procotolVersion = PROTOCOL_VERSION + 100 + 1;
+         if(packet2handshake.username.equals("-"))
+         {
+-            addToSendQueue(new Packet1Login(mc.session.username, "Password", 9));
++            addToSendQueue(new Packet1Login(mc.session.username, "Password", procotolVersion));
+         } else
+         {
+             try
+@@ -649,4 +669,5 @@
+     private WorldClient worldClient;
+     private boolean field_1210_g;
+     Random rand;
++    private String serverName;
+ }
+diff -x.git --new-file -ur minecraft.orig/net/minecraft/src/NetHandler.java minecraft/net/minecraft/src/NetHandler.java
+--- minecraft.orig/net/minecraft/src/NetHandler.java	2011-03-18 20:33:22.000000000 -0400
++++ minecraft/net/minecraft/src/NetHandler.java	2011-03-18 20:40:31.000000000 -0400
+@@ -1,4 +1,6 @@
+ package net.minecraft.src;
++
++import org.maski.pogic.Packet200Pogic;
+ // Decompiled by Jad v1.5.8g. Copyright 2001 Pavel Kouznetsov.
+ // Jad home page: http://www.kpdus.com/jad.html
+ // Decompiler options: packimports(3) braces deadcode 
+@@ -33,6 +35,11 @@
+         registerPacket(packet1login);
+     }
+ 
++    public void handleModsNeeded(Packet200Pogic packet)
++    {
++        registerPacket(packet);
++    }
++
+     public void handleFlying(Packet10Flying packet10flying)
+     {
+         registerPacket(packet10flying);
+diff -x.git --new-file -ur minecraft.orig/net/minecraft/src/Packet.java minecraft/net/minecraft/src/Packet.java
+--- minecraft.orig/net/minecraft/src/Packet.java	2011-03-18 20:33:23.000000000 -0400
++++ minecraft/net/minecraft/src/Packet.java	2011-03-18 20:40:31.000000000 -0400
+@@ -7,6 +7,8 @@
+ import java.util.HashMap;
+ import java.util.Map;
+ 
++import org.maski.pogic.Packet200Pogic;
++
+ public abstract class Packet
+ {
+ 
+@@ -15,7 +17,7 @@
+         isChunkDataPacket = false;
+     }
+ 
+-    static void addIdClassMapping(int i, Class class1)
++    public static void addIdClassMapping(int i, Class class1)
+     {
+         if(packetIdToClassMap.containsKey(Integer.valueOf(i)))
+         {
+@@ -182,5 +184,6 @@
+         addIdClassMapping(106, Packet106.class);
+         addIdClassMapping(130, Packet130.class);
+         addIdClassMapping(255, Packet255KickDisconnect.class);
++        addIdClassMapping(200, Packet200Pogic.class);
+     }
+ }
+diff -x.git --new-file -ur minecraft.orig/net/minecraft/src/RenderManager.java minecraft/net/minecraft/src/RenderManager.java
+--- minecraft.orig/net/minecraft/src/RenderManager.java	2011-03-18 20:33:23.000000000 -0400
++++ minecraft/net/minecraft/src/RenderManager.java	2011-03-18 22:12:34.000000000 -0400
+@@ -46,6 +46,11 @@
+ 
+     }
+ 
++    public void addEntityRender(Class<?> entityClass, Render render) {
++    	entityRenderMap.put(entityClass, render);
++    	render.setRenderManager(this);
++    }
++    
+     public Render getEntityClassRenderObject(Class class1)
+     {
+         Render render = (Render)entityRenderMap.get(class1);
+diff -x.git --new-file -ur minecraft.orig/org/maski/pogic/ModManifest.java minecraft/org/maski/pogic/ModManifest.java
+--- minecraft.orig/org/maski/pogic/ModManifest.java	1969-12-31 19:00:00.000000000 -0500
++++ minecraft/org/maski/pogic/ModManifest.java	2011-03-18 20:39:07.000000000 -0400
+@@ -0,0 +1,97 @@
++package org.maski.pogic;
++
++import java.io.File;
++import java.io.FileInputStream;
++import java.io.FileNotFoundException;
++import java.io.IOException;
++import java.net.MalformedURLException;
++import java.net.URL;
++import java.security.MessageDigest;
++import java.security.NoSuchAlgorithmException;
++import java.util.ArrayList;
++import java.util.List;
++
++public class ModManifest {
++	private List<Entry> entries = new ArrayList<Entry>();
++	private URL urlBase;
++
++	public class Entry {
++		public URL url;
++		public String hash;
++		public long length;
++
++		public Entry(URL url, String hash, long length) {
++			this.url = url;
++			this.hash = hash;
++			this.length = length;
++		}
++	}
++
++	public ModManifest() {
++
++	}
++
++	public ModManifest(URL urlBase) {
++		this.urlBase = urlBase;
++	}
++
++	public int size() {
++		return this.entries.size();
++	}
++
++	public List<Entry> getEntries() {
++		return this.entries;
++	}
++
++	public void add(URL url, String hash, long length) {
++		this.entries.add(new Entry(url, hash, length));
++	}
++
++	public void add(File file) {
++		String shaHash = this.getHash(file);
++
++		try {
++			this.add(new URL(this.urlBase.toString() + file.getName()),
++					shaHash, file.length());
++		} catch (MalformedURLException e) {
++			throw new RuntimeException(e);
++		}
++	}
++
++	String getHash(File file) {
++		MessageDigest md;
++		try {
++			md = MessageDigest.getInstance("SHA-256");
++		} catch (NoSuchAlgorithmException e1) {
++			throw new RuntimeException(e1);
++		}
++		FileInputStream fis;
++		try {
++			fis = new FileInputStream(file);
++		} catch (FileNotFoundException e) {
++			throw new RuntimeException(e);
++		}
++
++		byte[] dataBytes = new byte[1024];
++
++		int nread = 0;
++		try {
++			while ((nread = fis.read(dataBytes)) != -1) {
++				md.update(dataBytes, 0, nread);
++			}
++		} catch (IOException e) {
++			throw new RuntimeException(e);
++		}
++		;
++		byte[] mdbytes = md.digest();
++
++		// convert the byte to hex format method 1
++		StringBuffer sb = new StringBuffer();
++		for (int i = 0; i < mdbytes.length; i++) {
++			sb.append(Integer.toString((mdbytes[i] & 0xff) + 0x100, 16)
++					.substring(1));
++		}
++
++		return sb.toString();
++	}
++}
+diff -x.git --new-file -ur minecraft.orig/org/maski/pogic/Packet200Pogic.java minecraft/org/maski/pogic/Packet200Pogic.java
+--- minecraft.orig/org/maski/pogic/Packet200Pogic.java	1969-12-31 19:00:00.000000000 -0500
++++ minecraft/org/maski/pogic/Packet200Pogic.java	2011-03-18 20:40:31.000000000 -0400
+@@ -0,0 +1,91 @@
++package org.maski.pogic;
++
++import java.io.DataInputStream;
++import java.io.DataOutputStream;
++import java.io.IOException;
++import java.net.URL;
++import java.util.HashMap;
++import java.util.Map;
++
++
++import net.minecraft.src.NetHandler;
++import net.minecraft.src.Packet;
++
++public class Packet200Pogic extends Packet {
++
++	public ModManifest packages;
++	public Map<Integer, String> entityMap;
++
++    public Packet200Pogic() {
++        packages = new ModManifest();
++		entityMap = new HashMap<Integer, String>();
++
++    }
++        	
++	public Packet200Pogic(ModManifest packages, Map<Integer, String> entityMap) {
++		this.packages = packages;
++		this.entityMap = entityMap;
++	}
++	
++	// size of packet
++	@Override
++	public int getPacketSize() {
++		int acc = 4;
++		for (ModManifest.Entry entry : packages.getEntries()) {
++			acc += entry.url.toString().length();
++			acc += 8;
++			acc += entry.hash.length();
++		}
++		acc += 4;
++		for (Map.Entry<Integer, String> entry: entityMap.entrySet()) {
++			acc += 4;
++			acc += entry.getValue().length();
++		}
++		return acc;
++	}
++
++	@Override
++	public void readPacketData(DataInputStream in) {
++		try {
++			int size = in.readInt();
++			for (int ii = 0; ii < size; ii++) {
++				URL url = new URL(in.readUTF());
++				long length = in.readLong();
++				String hash = in.readUTF();
++				packages.add(url, hash, length);
++			}
++			int mapSize = in.readInt();
++			for (int ii = 0; ii < mapSize; ii++) {
++				entityMap.put(in.readInt(), in.readUTF());
++			}
++		} catch (IOException e) {
++			throw new RuntimeException(e);
++		}
++		
++	}
++
++	@Override
++	public void writePacketData(DataOutputStream out) {
++		try {
++			out.writeInt(packages.size());
++			for (ModManifest.Entry entry : packages.getEntries()) {
++				out.writeUTF(entry.url.toString());
++				out.writeLong(entry.length);
++				out.writeUTF(entry.hash);
++			}
++			out.writeInt(entityMap.size());
++			for (Map.Entry<Integer, String> entry: entityMap.entrySet()) {
++				out.writeInt(entry.getKey());
++				out.writeUTF(entry.getValue());
++			}
++		} catch (IOException e) {
++			throw new RuntimeException(e);
++		}
++	}
++
++	@Override
++	public void processPacket(NetHandler netHandler) {
++		netHandler.handleModsNeeded(this);
++	}
++
++}
+diff -x.git --new-file -ur minecraft.orig/org/maski/pogic/PogicClassLoader.java minecraft/org/maski/pogic/PogicClassLoader.java
+--- minecraft.orig/org/maski/pogic/PogicClassLoader.java	1969-12-31 19:00:00.000000000 -0500
++++ minecraft/org/maski/pogic/PogicClassLoader.java	2011-03-17 16:05:40.000000000 -0400
+@@ -0,0 +1,46 @@
++package org.maski.pogic;
++import java.io.IOException;
++import java.io.InputStream;
++import java.net.URL;
++import java.net.URLClassLoader;
++import java.security.CodeSource;
++import java.security.PermissionCollection;
++import java.security.Permissions;
++import java.util.Properties;
++
++
++public class PogicClassLoader extends URLClassLoader {
++	final public URL url;
++	
++	public PogicClassLoader(URL url) {
++	    super(new URL[] { url });
++	    this.url = url;
++	}
++
++	public Class<PogicMod> getModClass() {
++	    InputStream in = this.getResourceAsStream("pogic.properties");
++	    if (in == null) {
++	    	throw new RuntimeException("pogic.properties not found in file");
++	    }
++	    Properties props = new java.util.Properties();
++	    try {
++			props.load(in);
++		} catch (IOException e) {
++			throw new RuntimeException(e);
++		}
++	    
++		try {
++			return (Class<PogicMod>) loadClass(props.getProperty("mod-class"));
++		} catch (ClassNotFoundException e) {
++			throw new RuntimeException(e);
++		}
++	}
++	
++	protected PermissionCollection getPermissions(CodeSource codesource) {
++		//System.out.println("getPermissions " + codesource.toString());
++		//Permissions p = new Permissions();
++		//p.add(new FilePermission("/etc", "read"));
++		
++		return new Permissions();
++	}
++}
+diff -x.git --new-file -ur minecraft.orig/org/maski/pogic/PogicDefaultPolicy.java minecraft/org/maski/pogic/PogicDefaultPolicy.java
+--- minecraft.orig/org/maski/pogic/PogicDefaultPolicy.java	1969-12-31 19:00:00.000000000 -0500
++++ minecraft/org/maski/pogic/PogicDefaultPolicy.java	2011-03-17 22:52:54.000000000 -0400
+@@ -0,0 +1,24 @@
++package org.maski.pogic;
++
++import java.security.Permission;
++import java.security.Policy;
++import java.security.ProtectionDomain;
++
++/**
++ * A default policy much like the one if you don't install a security manager.
++ * 
++ * @author Myers Carpenter
++ *
++ */
++
++// FIXME I know this is wrong.  I've tried many things and this works for now
++// tried creating my own policy file and adding that via System.setProperty("policy.url.1")
++public class PogicDefaultPolicy extends Policy {
++	public boolean implies(ProtectionDomain domain, Permission permission)  {
++		if (domain.getClassLoader().getClass() == PogicClassLoader.class) {
++			System.out.println("NO!");
++			return false;
++		}
++		return true;
++	}
++}
+diff -x.git --new-file -ur minecraft.orig/org/maski/pogic/PogicMod.java minecraft/org/maski/pogic/PogicMod.java
+--- minecraft.orig/org/maski/pogic/PogicMod.java	1969-12-31 19:00:00.000000000 -0500
++++ minecraft/org/maski/pogic/PogicMod.java	2011-03-17 23:15:45.000000000 -0400
+@@ -0,0 +1,23 @@
++package org.maski.pogic;
++
++public abstract class PogicMod {
++	private boolean initialized;
++	private PogicModLoader loader;
++	
++	public PogicMod() {
++	}
++
++	public abstract String getVersion();
++	
++	public abstract void onEnable();
++	
++    protected final void initialize(PogicModLoader loader) {
++        if (!initialized) {
++            this.initialized = true;
++            this.loader = loader;
++        }
++    }
++    public final PogicModLoader getLoader() {
++    	return loader;
++    }
++}
+diff -x.git --new-file -ur minecraft.orig/org/maski/pogic/PogicModLoader.java minecraft/org/maski/pogic/PogicModLoader.java
+--- minecraft.orig/org/maski/pogic/PogicModLoader.java	1969-12-31 19:00:00.000000000 -0500
++++ minecraft/org/maski/pogic/PogicModLoader.java	2011-03-18 20:39:07.000000000 -0400
+@@ -0,0 +1,175 @@
++package org.maski.pogic;
++
++import java.io.File;
++import java.io.FileOutputStream;
++import java.io.IOException;
++import java.io.InputStream;
++import java.io.OutputStream;
++import java.net.HttpURLConnection;
++import java.net.MalformedURLException;
++import java.net.URL;
++import java.security.Policy;
++import java.util.ArrayList;
++import java.util.HashMap;
++import java.util.List;
++import java.util.Map;
++
++import org.maski.pogic.ModManifest.Entry;
++
++import net.minecraft.client.Minecraft;
++import net.minecraft.src.Entity;
++import net.minecraft.src.EntityList;
++import net.minecraft.src.ModelBase;
++import net.minecraft.src.NetClientHandler;
++import net.minecraft.src.Render;
++import net.minecraft.src.RenderManager;
++
++
++public class PogicModLoader {
++	private Minecraft mc;
++	private NetClientHandler netClientHandler;
++	private List<PogicClassLoader> classLoaders = new ArrayList<PogicClassLoader>();
++	private ModManifest manifest;
++	
++	private Map<String, EntityEntry> entityMap = new HashMap<String, EntityEntry>();
++	
++    //FIXME put up gui screen showing download progress.  
++	//FIXME send keep alives.
++	//FIXME on the server side don't send packet 13 until the client sends an empty packet200
++
++	public PogicModLoader(Minecraft mc) {
++		this.mc = mc;
++		
++		Policy.setPolicy(new PogicDefaultPolicy());
++	    System.setSecurityManager(new SecurityManager());
++
++	}
++	
++	public void loadMods(File folder, ModManifest manifest) {
++		// FIXME do this in a thread
++		// FIXME some how show progress in the gui http://www.java-tips.org/java-se-tips/javax.swing/how-to-create-a-download-manager-in-java.html
++		// FIXME check the hashes after
++		// FIXME keep a catalog of all jars downloaded - use catalog as a cache system
++
++		this.manifest = manifest;
++		this.fetchMods(folder);
++		
++		for (Entry e : manifest.getEntries()) {
++			PogicClassLoader classLoader;
++			try {
++				classLoader = new PogicClassLoader(getLocalFile(folder, e.url).toURI().toURL());
++			} catch (MalformedURLException e1) {
++				throw new RuntimeException(e1);
++			}
++			classLoaders.add(classLoader);
++			Class<PogicMod> mod = classLoader.getModClass();
++			PogicMod modInstance;
++			try {
++				modInstance = mod.newInstance();
++				modInstance.initialize(this);
++				modInstance.onEnable();
++				
++			} catch (InstantiationException e1) {
++				throw new RuntimeException(e1);
++			} catch (IllegalAccessException e1) {
++				throw new RuntimeException(e1);
++			} catch (SecurityException e1) {
++				//FIXME since the server gave us this mod we should disconnect from it, and show the error
++				// so they can fix it.
++				System.out.println("This mod did something bad");
++				e1.printStackTrace();
++				return;
++			}
++			System.out.println("mod version: " + modInstance.getVersion());
++		}
++			
++	}
++	
++	public void addEntity(String name, Class<? extends Entity> entityClass, Class<? extends ModelBase> modelClass, Class<? extends Render> renderClass) {
++		entityMap.put(name, new EntityEntry(entityClass, modelClass, renderClass));
++	}
++	
++	private File getLocalFile(File folder, URL remoteURL) {
++		String filename = remoteURL.getPath().substring(
++				remoteURL.getPath().lastIndexOf("/")+1);
++		System.out.println(filename);
++		return new File(folder, filename);
++
++	}
++	
++	public void fetchMods(File folder) {
++		System.out.println("fetchMods");
++
++		for (Entry e : manifest.getEntries()) {
++			System.out.println(e.url.toString());
++			try {
++				this.downloadURLToFolder(folder, e.url, e.hash);
++			} catch (IOException e1) {
++				throw new RuntimeException(e1);
++			}
++		}
++	}
++
++	File downloadURLToFolder(File folder, URL url, String hash)
++			throws IOException {
++
++		
++		HttpURLConnection urlc = (HttpURLConnection)url.openConnection();
++		urlc.connect();
++		File destination = getLocalFile(folder, url);
++		InputStream input = urlc.getInputStream();
++		OutputStream output = new FileOutputStream(destination);
++
++		byte[] buf = new byte[16384];
++		while (true) {
++			int length = input.read(buf);
++			if (length < 0)
++				break;
++			output.write(buf, 0, length);
++		}
++		input.close();
++		output.close();
++		return destination;
++	}
++
++	public void registerEntites(Map<Integer, String> entityIdToNameMap) {
++		System.out.println("registerEntites!");
++		
++		for (Map.Entry<Integer, String> entry : entityIdToNameMap.entrySet()) {
++			EntityEntry ee = this.entityMap.get(entry.getValue());
++			if (ee == null) {
++				System.out.println("No client side mod has registered for " + entry.getValue());
++				continue;
++			}
++			System.out.println(entry.getValue() + " " + entry.getKey());
++			// add entity
++			// FIXME use one class loader for all mods
++			//Class<?> entityClass = classLoaders.get(0).loadClass(entry.getValue());
++			//RenderManager.instance.addEntityRender(entityClass, entityClass);
++			System.out.println(ee.entityClass + " " + ee.renderClass);
++			EntityList.addMapping(ee.entityClass, entry.getValue(), entry.getKey());
++			try {
++				RenderManager.instance.addEntityRender(ee.entityClass, ee.renderClass.newInstance());
++			} catch (InstantiationException e) {
++				throw new RuntimeException(e);
++			} catch (IllegalAccessException e) {
++				throw new RuntimeException(e);
++			}
++
++		}
++	}
++	
++	private class EntityEntry {
++		public EntityEntry(Class<? extends Entity> entityClass,
++				Class<? extends ModelBase> modelClass,
++				Class<? extends Render> renderClass) {
++			this.entityClass = entityClass;
++			this.modelClass = modelClass;
++			this.renderClass = renderClass;
++		}
++
++		public Class<? extends Entity> entityClass;
++		public Class<? extends ModelBase> modelClass;
++		public Class<? extends Render> renderClass;
++	}
++}
