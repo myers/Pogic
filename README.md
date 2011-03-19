@@ -1,11 +1,12 @@
 # Pogic
 
-This is a Minecraft Client Side Mod that will download other client mods as
-requested by a server.  Using this you can add new creatures to your SMP
-server.
+This is a Minecraft client/server mod that will allow SMP servers tell
+clients to download and run mods.  Using this you can add new creatures to
+your SMP server, and that's just the tip of the iceburg.
 
 The client side mods are run in a Java sandbox keeping your computer safe
-from evil servers out there.
+from evil servers out there.  There is a limit API that the client mods can
+make use of, but that API will grow.
 
 ## Prerelease Demo Video
 
@@ -37,24 +38,28 @@ These directions should work on a unix system (e.g. Linux or Mac OS X)
 
     cd $WORKSPACE
     git clone https://github.com/myers/CraftBukkit.git
+    cd CraftBukkit
     mvn clean package
 
     cd $WORKSPACE
     mkdir myserver
     cd myserver
-    mkdir plugins
-    cp -v $WORKSPACE/Pogic/server.sh .
+    cp -v $WORKSPACE/Pogic/server.sh $WORKSPACE/Pogic/server.properties .
+    mkdir plugins clientmods
     cd $WORKSPACE
-    ln -s $WORKSPACE/myserver/plugins .
+    ln -s $WORKSPACE/myserver/plugins $WORKSPACE/myserver/clientmods .
 
     # Download Minecraft Coder Pack in mcp29a.zip
     # unpack to $WORKSPACE/mcp29a
-    # read README-MCP.TXT
-    # decompile the client
-    cd $WORKSPACE/mcp29a/sources/minecraft
-    patch -p0 < $WORKSPACE/Pogic/pogic.mcp.patch
     cd $WORKSPACE/mcp29a
-    sh script/recompile.sh
+    mv *.bat scripts/
+    mv scripts/*.sh .
+    chmod +x *.sh
+    # read README-MCP.TXT, then README-LINUX or README-OSX and follow directions to decompile
+    cd $WORKSPACE/mcp29a/sources/minecraft
+    patch -p1 < $WORKSPACE/Pogic/pogic.mcp.patch
+    cd $WORKSPACE/mcp29a
+    ./recompile.sh
 
     cd $WORKSPACE
     git clone https://github.com/myers/SamplePogicPlugin.git
@@ -66,7 +71,7 @@ These directions should work on a unix system (e.g. Linux or Mac OS X)
     cd SamplePogicMod
     ant deploy
 
-    # this install a Bukkit plugin that let's you spawn creatures
+    # this install a Bukkit plugin that let's you spawn creatures, and prevents all others from spawning
     cd $WORKSPACE
     git clone https://github.com/myers/Overlord.git
     cd Overlord
@@ -79,9 +84,9 @@ These directions should work on a unix system (e.g. Linux or Mac OS X)
     cd $WORKSPACE/mcp29a
     sh scripts/test_game.sh
 
-    # connect to localhost in the Minecraft client
+    # connect to the "localhost" server in the Minecraft client
     # point where the creature should spawn
     # hit the chat key when connect and type
-    /o BabyCreeper
+    /spawn BabyCreeper
 
 [mcp]: http://mcp.ocean-labs.de/index.php/MCP_Releases
