@@ -9,7 +9,7 @@ from evil servers out there.
 
 ## Prerelease Demo Video
 
-http://www.youtube.com/watch?v=uftHwJFKyzo
+[Pogic Prerelease Demo: Baby Creeper](http://www.youtube.com/watch?v=uftHwJFKyzo)
 
 ## Release Status
 
