@@ -5,8 +5,8 @@ clients to download and run mods.  Using this you can add new creatures to
 your SMP server, and that's just the tip of the iceburg.
 
 The client side mods are run in a Java sandbox keeping your computer safe
-from evil servers out there.  There is a limit API that the client mods can
-make use of, but that API will grow.
+from evil servers out there.  There is a limited API that the client mods
+can make use of, but that API will grow.
 
 ## Prerelease Demo Video
 
