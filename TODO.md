@@ -17,3 +17,8 @@
 * allow the http url where the client mods can be found to be set (in server.properites)
 * have the client mod jar file embedded in the server side plugin for easy of installation
 * sandbox the client mod code even more.  It should only be able to make a limited number of calls on the client.
+* add support for new blocks
+* add support for new items
+* add support for new dialog boxes (like the inventory dialog box)
+* add support for new on screen display items
+* add support for forcing texture packs
